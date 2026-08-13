@@ -1,0 +1,23 @@
+Merchant,Category,Amount,Date
+Target,Groceries,-45.50,May 15 2024
+Netflix,Entertainment,-15.99,May 1 2024
+Netflix,Entertainment,-15.99,June 1 2024
+Netflix,Entertainment,-15.99,July 1 2024
+Spotify,Entertainment,-9.99,May 5 2024
+Spotify,Entertainment,-9.99,June 5 2024
+Spotify,Entertainment,-9.99,July 5 2024
+Equinox,Fitness,-180.00,May 3 2024
+Equinox,Fitness,-180.00,June 3 2024
+Equinox,Fitness,-180.00,July 3 2024
+Whole Foods,Groceries,-62.30,May 20 2024
+Whole Foods,Groceries,-58.10,June 18 2024
+Uber,Travel,-22.40,May 10 2024
+Chipotle,Dining Out,-13.75,May 12 2024
+Amazon,Shopping,-34.99,May 22 2024
+Con Edison,Utilities,-95.00,May 8 2024
+Con Edison,Utilities,-102.50,June 8 2024
+Paycheck,Income,3200.00,May 1 2024
+Paycheck,Income,3200.00,June 1 2024
+Starbucks,Dining Out,-6.25,June 2 2024
+Bad Row Missing Amount,Groceries,,June 10 2024
+Bad Row Bad Date,Shopping,-20.00,not-a-date

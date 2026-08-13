@@ -1,0 +1,6 @@
+{
+  "name": "SpendWise",
+  "description": "AI-powered financial intelligence and expense tracking dashboard with predictive analytics and intelligent receipt scanning.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
