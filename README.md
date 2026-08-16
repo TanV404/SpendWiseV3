@@ -61,8 +61,7 @@ The frontend provides the dashboard and financial management interface. FastAPI 
 ## 🧪 Testing
 
 * **18 backend Pytest tests**
-* **6/6 frontend Vitest tests**
-* **0 TypeScript errors**
+* **6 frontend Vitest tests**
 * Production build validation
 * Migration synchronization checks
 
