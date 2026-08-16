@@ -100,10 +100,10 @@ pip install -r requirements.txt
 
 # Configure environment variables
 cp ../.env.example .env
-# Edit .env and specify DATABASE_URL, JWT_SECRET, RESEND_API_KEY
+# Edit .env with your local settings
 
 # Run database migrations
-DATABASE_URL=postgresql://localhost:5432/spendwise alembic upgrade head
+alembic upgrade head
 
 # Start FastAPI server
 uvicorn app.main:app --reload --port 8000
@@ -138,26 +138,6 @@ docker-compose up --build
 
 ---
 
-## Environment Variables
-
-### Backend (`backend/.env` or root `.env`)
-
-| Variable | Description | Example |
-|---|---|---|
-| `DATABASE_URL` | PostgreSQL connection string | `postgresql://user:pass@localhost:5432/spendwise` |
-| `JWT_SECRET` | Secret key for signing auth tokens | `f1cdc2b6b3f74c0dfb7516c9bba38...` |
-| `JWT_ALGORITHM` | JWT signing algorithm | `HS256` |
-| `ACCESS_TOKEN_EXPIRE_MINUTES` | Access token lifespan | `60` |
-| `REFRESH_TOKEN_EXPIRE_DAYS` | Refresh token lifespan | `7` |
-| `RESEND_API_KEY` | Resend API Key | `re_123456789...` |
-| `RESEND_FROM_EMAIL` | Verified sender address | `onboarding@resend.dev` |
-
-### Frontend (`frontend/.env`)
-
-| Variable | Description | Example |
-|---|---|---|
-| `VITE_API_BASE_URL` | Backend API base URL | `http://localhost:8000` |
-
 ---
 
 ## 🧪 Testing & Code Quality
@@ -177,18 +157,3 @@ npm test                # Vitest unit test suite (6/6 tests passing)
 npx tsc --noEmit        # TypeScript type checker (0 errors)
 npm run build           # Production bundle build
 ```
-
----
-
-## 🗺️ Roadmap
-
-- [ ] Auto-detection of recurring subscriptions from transaction history
-- [ ] Multi-currency & foreign exchange support
-- [ ] Shared / household multi-user budgets
-
----
-
-## Author
-
-**Tanvi Pathare**  
-[Portfolio](https://tanvi-pathare.vercel.app/) · [GitHub](https://github.com/TanV404)
