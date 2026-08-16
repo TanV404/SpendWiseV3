@@ -15,6 +15,16 @@ SpendWise turns transaction data into actionable insights such as **budget utili
 * **Email Alerts** — Resend-powered budget warnings, subscription reminders, and weekly spending digests with idempotent delivery.
 * **Authentication** — JWT authentication, bcrypt password hashing, token refresh, and user-isolated data.
 
+## SpendWise Dashboard Overview
+**KPI Cards & Charts**
+![Dashboard Overview](frontend/public/Dashboard1.png)
+
+**Budget Forecast & Recurring Subscriptions**
+![Budget Forecast & Recurring Subscriptions](frontend/public/Dashboard2.png)
+
+**Transactions**
+![SpendWise Transactions](frontend/public/Dashboard3.png)
+
 ## 🏗️ How It Works
 
 ```text
