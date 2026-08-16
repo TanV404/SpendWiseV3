@@ -1,12 +1,9 @@
-import uuid
-
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from app.dependencies import get_current_user, get_db
 from app.models import Category, CategoryType, Transaction, User
 from app.schemas import (
-    GoogleAuthRequest,
     TokenResponse,
     UserProfileResponse,
     UserRefresh,
@@ -148,43 +145,6 @@ async def login(
         token_type="bearer",
         refresh_token=refresh_token,
         user=UserProfileResponse.model_validate(user),
-    )
-
-
-@router.post("/google", response_model=TokenResponse)
-def google_auth(google_in: GoogleAuthRequest, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.email == google_in.email).first()
-    if not user:
-        random_password = get_password_hash(str(uuid.uuid4()))
-        user = User(
-            email=google_in.email,
-            password_hash=random_password,
-            name=google_in.name,
-        )
-        db.add(user)
-        db.commit()
-        db.refresh(user)
-
-        seed_user_categories(user.id, db)
-        seed_user_initial_transactions(user.id, db)
-
-    access_token = create_access_token(user.id)
-    refresh_token = create_refresh_token(user.id)
-
-    user_profile = UserProfileResponse(
-        id=user.id,
-        name=user.name,
-        email=user.email,
-        avatar=google_in.avatar or "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80",
-        provider="google",
-        created_at=user.created_at,
-    )
-
-    return TokenResponse(
-        access_token=access_token,
-        token_type="bearer",
-        refresh_token=refresh_token,
-        user=user_profile,
     )
 
 

@@ -69,19 +69,3 @@ def test_auth_me_endpoint(client):
     # Unauthorized access -> 401
     bad_me = client.get("/auth/me", headers={"Authorization": "Bearer invalid.token.here"})
     assert bad_me.status_code == 401
-
-
-def test_google_auth_flow(client):
-    res = client.post(
-        "/auth/google",
-        json={
-            "email": "alex.rivera@gmail.com",
-            "name": "Alex Rivera",
-            "avatar": "https://example.com/avatar.jpg",
-        },
-    )
-    assert res.status_code == 200
-    data = res.json()
-    assert "access_token" in data
-    assert data["user"]["email"] == "alex.rivera@gmail.com"
-    assert data["user"]["provider"] == "google"

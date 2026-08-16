@@ -1,7 +1,7 @@
 from calendar import monthrange
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, BackgroundTasks, Depends
 from sqlalchemy.orm import Session
 
 from app.dependencies import get_current_user, get_db
@@ -12,6 +12,7 @@ from app.schemas import (
     CategoryAtRisk,
     ForecastResponse,
 )
+from app.services.alerts import check_budget_threshold
 
 router = APIRouter(prefix="/budgets", tags=["budgets"])
 
@@ -31,6 +32,7 @@ def parse_tx_date(date_str: str) -> datetime | None:
 @router.post("", status_code=201)
 def create_or_update_budget(
     budget_in: BudgetCreate,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -56,8 +58,12 @@ def create_or_update_budget(
         .first()
     )
 
+    result_budget = None
     if existing:
-        existing.monthly_limit = budget_in.monthly_limit
+        if budget_in.monthly_limit is not None:
+            existing.monthly_limit = budget_in.monthly_limit
+        if budget_in.savings_goal is not None:
+            existing.savings_goal = budget_in.savings_goal
         if budget_in.essential_pct is not None:
             existing.essential_pct = budget_in.essential_pct
         if budget_in.discretionary_pct is not None:
@@ -66,12 +72,13 @@ def create_or_update_budget(
             existing.ai_smart_adjust = budget_in.ai_smart_adjust
         db.commit()
         db.refresh(existing)
-        return existing
+        result_budget = existing
     else:
         new_b = Budget(
             user_id=current_user.id,
             category_id=category_id,
-            monthly_limit=budget_in.monthly_limit,
+            monthly_limit=budget_in.monthly_limit if budget_in.monthly_limit is not None else 0.0,
+            savings_goal=budget_in.savings_goal if budget_in.savings_goal is not None else 0.0,
             essential_pct=budget_in.essential_pct if budget_in.essential_pct is not None else 50.0,
             discretionary_pct=budget_in.discretionary_pct if budget_in.discretionary_pct is not None else 30.0,
             ai_smart_adjust=budget_in.ai_smart_adjust if budget_in.ai_smart_adjust is not None else True,
@@ -79,7 +86,17 @@ def create_or_update_budget(
         db.add(new_b)
         db.commit()
         db.refresh(new_b)
-        return new_b
+        result_budget = new_b
+
+    # Check budget threshold in background
+    check_budget_threshold(
+        user_id=current_user.id,
+        category_id=category_id,
+        db=db,
+        background_tasks=background_tasks,
+    )
+
+    return result_budget
 
 
 @router.get("/status", response_model=list[BudgetStatusResponse])
@@ -90,11 +107,19 @@ def get_budget_status(
     budgets = db.query(Budget).filter(Budget.user_id == current_user.id).all()
     transactions = db.query(Transaction).filter(Transaction.user_id == current_user.id).all()
 
-    # Compute spent so far this month for each category and overall
+    # Compute spent so far this month for each category and overall with defensive sanity checks
     cat_spent = {}
     total_spent = 0.0
 
     for tx in transactions:
+        if getattr(tx, "is_flagged", False) or abs(tx.amount) >= 1_000_000:
+            import logging
+            logging.getLogger(__name__).warning(
+                "Defensive aggregation skipped outlier/flagged transaction ID=%s, merchant=%s, amount=%s",
+                tx.id, tx.merchant, tx.amount
+            )
+            continue
+
         if tx.amount < 0:  # Expense
             spent_amt = abs(tx.amount)
             total_spent += spent_amt
@@ -107,6 +132,7 @@ def get_budget_status(
                 category_id=None,
                 category_name="Overall",
                 monthly_limit=0.0,
+                savings_goal=0.0,
                 essential_pct=50.0,
                 discretionary_pct=30.0,
                 essential=0.0,
@@ -123,19 +149,16 @@ def get_budget_status(
         c_id = b.category_id or "unassigned"
         spent = cat_spent.get(c_id, total_spent if b.category_id is None else 0.0)
         remaining = max(0.0, b.monthly_limit - spent)
-
-        ess_val = round(b.monthly_limit * (b.essential_pct / 100.0), 2)
-        disc_val = round(b.monthly_limit * (b.discretionary_pct / 100.0), 2)
-
         result.append(
             BudgetStatusResponse(
                 category_id=b.category_id,
                 category_name=cat_name,
                 monthly_limit=b.monthly_limit,
+                savings_goal=getattr(b, "savings_goal", 0.0) or 0.0,
                 essential_pct=b.essential_pct,
                 discretionary_pct=b.discretionary_pct,
-                essential=ess_val,
-                discretionary=disc_val,
+                essential=round(b.monthly_limit * (b.essential_pct / 100.0), 2),
+                discretionary=round(b.monthly_limit * (b.discretionary_pct / 100.0), 2),
                 ai_smart_adjust=b.ai_smart_adjust,
                 spent=round(spent, 2),
                 remaining=round(remaining, 2),
@@ -171,6 +194,14 @@ def get_budget_forecast(
     total_expense_so_far = 0.0
 
     for tx in transactions:
+        if getattr(tx, "is_flagged", False) or abs(tx.amount) >= 1_000_000:
+            import logging
+            logging.getLogger(__name__).warning(
+                "Forecast aggregation skipped outlier/flagged transaction ID=%s, merchant=%s, amount=%s",
+                tx.id, tx.merchant, tx.amount
+            )
+            continue
+
         if tx.amount < 0:
             amt = abs(tx.amount)
             total_expense_so_far += amt

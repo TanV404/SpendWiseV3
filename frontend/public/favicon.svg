@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48">
+  <defs>
+    <linearGradient id="spendwise-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3b82f6"/>
+      <stop offset="100%" stop-color="#1d4ed8"/>
+    </linearGradient>
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#3b82f6" flood-opacity="0.4"/>
+    </filter>
+  </defs>
+  <!-- Background Rounded Icon Tile -->
+  <rect width="48" height="48" rx="12" fill="url(#spendwise-gradient)" filter="url(#glow)"/>
+  <!-- Wallet Body -->
+  <path d="M11 15C11 13.3431 12.3431 12 14 12H34C35.6569 12 37 13.3431 37 15V17H14C12.3431 17 11 18.3431 11 20V15Z" fill="#ffffff" fill-opacity="0.75"/>
+  <path d="M11 19C11 17.8954 11.8954 17 13 17H35C36.1046 17 37 17.8954 37 19V33C37 34.1046 36.1046 35 35 35H13C11.8954 35 11 34.1046 11 33V19Z" fill="#ffffff"/>
+  <!-- Wallet Flap / Clasp -->
+  <path d="M28 22H37V30H28C25.7909 30 24 28.2091 24 26C24 23.7909 25.7909 22 28 22Z" fill="#2563eb"/>
+  <circle cx="28.5" cy="26" r="2" fill="#ffffff"/>
+</svg>

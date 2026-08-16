@@ -1,7 +1,17 @@
 import csv
-from datetime import datetime, timezone
+import hashlib
+from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    File,
+    HTTPException,
+    Request,
+    UploadFile,
+    status,
+)
 from sqlalchemy.orm import Session
 
 from app.dependencies import get_current_user, get_db
@@ -10,9 +20,11 @@ from app.schemas import (
     CSVImportErrorDetail,
     CSVImportResponse,
     TransactionCreate,
+    TransactionImportRow,
     TransactionResponse,
     TransactionUpdate,
 )
+from app.services.alerts import check_budget_threshold
 
 router = APIRouter(prefix="/transactions", tags=["transactions"])
 
@@ -100,6 +112,7 @@ def list_transactions(
 @router.post("", response_model=TransactionResponse, status_code=status.HTTP_201_CREATED)
 def create_transaction(
     tx_in: TransactionCreate,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -111,6 +124,26 @@ def create_transaction(
         )
 
     cat_id = get_or_create_category_id(db, current_user.id, tx_in.category)
+
+    # 10-second duplicate check for manual creation (catches double-submit/double-click)
+    ten_seconds_ago = datetime.now(timezone.utc) - timedelta(seconds=10)
+    recent_duplicate = (
+        db.query(Transaction)
+        .filter(
+            Transaction.user_id == current_user.id,
+            Transaction.merchant == tx_in.merchant.strip(),
+            Transaction.amount == tx_in.amount,
+            Transaction.date == formatted_date,
+            Transaction.category_id == cat_id,
+            Transaction.created_at >= ten_seconds_ago,
+        )
+        .first()
+    )
+    if recent_duplicate:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Duplicate transaction detected (submitted within last 10 seconds)",
+        )
 
     icon = tx_in.icon
     if not icon:
@@ -124,14 +157,24 @@ def create_transaction(
     tx = Transaction(
         user_id=current_user.id,
         category_id=cat_id,
-        merchant=tx_in.merchant,
+        merchant=tx_in.merchant.strip(),
         date=formatted_date,
         amount=tx_in.amount,
         icon=icon,
+        is_flagged=False,
     )
     db.add(tx)
     db.commit()
     db.refresh(tx)
+
+    # Check budget threshold in background if transaction is an expense
+    if tx.amount < 0:
+        check_budget_threshold(
+            user_id=current_user.id,
+            category_id=cat_id,
+            db=db,
+            background_tasks=background_tasks,
+        )
 
     return TransactionResponse(
         id=tx.id,
@@ -257,6 +300,32 @@ async def import_csv_transactions(
     row_idx = 0
     today_str = datetime.now(timezone.utc).strftime("%b %d, %Y")
 
+    # Fetch all existing transactions for this user to build duplicate signature hashes
+    existing_user_txs = (
+        db.query(Transaction)
+        .filter(Transaction.user_id == current_user.id)
+        .all()
+    )
+
+    # Helper function to compute deterministic signature hash
+    def compute_tx_hash(u_id: str, d_str: str, merch: str, amt_val: float, cat_str: str) -> str:
+        key = f"{u_id}|{d_str.strip().lower()}|{merch.strip().lower()}|{float(amt_val):.2f}|{cat_str.strip().lower()}"
+        return hashlib.sha256(key.encode("utf-8")).hexdigest()
+
+    existing_hashes = {
+        compute_tx_hash(
+            tx.user_id,
+            tx.date,
+            tx.merchant,
+            tx.amount,
+            tx.category_rel.name if tx.category_rel else "Other",
+        )
+        for tx in existing_user_txs
+    }
+
+    # Also track hashes within the current batch to detect intra-file duplicates
+    batch_hashes = set()
+
     for row in reader:
         row_idx += 1
         if not row or all(not cell.strip() for cell in row):
@@ -272,59 +341,80 @@ async def import_csv_transactions(
             errors.append(CSVImportErrorDetail(row=row_idx, reason="Invalid row format: too few columns"))
             continue
 
+        merchant = ""
+        category_name = "Other"
+        amount_str = ""
+        date_str = today_str
+
+        if len(clean_row) >= 5 and clean_row[0].startswith("tx-"):
+            merchant = clean_row[1]
+            category_name = clean_row[2] or "Other"
+            date_str = clean_row[3] or today_str
+            amount_str = clean_row[4]
+        elif len(clean_row) >= 4:
+            merchant = clean_row[0]
+            category_name = clean_row[1] or "Other"
+            amount_str = clean_row[2]
+            date_str = clean_row[3] or today_str
+        elif len(clean_row) == 3:
+            merchant = clean_row[0]
+            category_name = clean_row[1] or "Other"
+            amount_str = clean_row[2]
+        elif len(clean_row) == 2:
+            merchant = clean_row[0]
+            amount_str = clean_row[1]
+
+        # Strictly validate through TransactionImportRow Pydantic model
         try:
-            merchant = ""
-            category_name = "Other"
-            amount_str = ""
-            date_str = today_str
+            validated_row = TransactionImportRow(
+                merchant=merchant,
+                category=category_name,
+                amount=amount_str,
+                date=date_str,
+            )
+        except Exception as e:
+            # Extract clean error message
+            err_msg = str(e)
+            if hasattr(e, "errors") and callable(e.errors):
+                try:
+                    err_msg = e.errors()[0]["msg"]
+                    if "Value error, " in err_msg:
+                        err_msg = err_msg.replace("Value error, ", "")
+                except Exception:
+                    pass
+            errors.append(CSVImportErrorDetail(row=row_idx, reason=err_msg))
+            continue
 
-            if len(clean_row) >= 5 and clean_row[0].startswith("tx-"):
-                merchant = clean_row[1]
-                category_name = clean_row[2] or "Other"
-                date_str = clean_row[3] or today_str
-                amount_str = clean_row[4]
-            elif len(clean_row) >= 4:
-                merchant = clean_row[0]
-                category_name = clean_row[1] or "Other"
-                amount_str = clean_row[2]
-                date_str = clean_row[3] or today_str
-            elif len(clean_row) == 3:
-                merchant = clean_row[0]
-                category_name = clean_row[1] or "Other"
-                amount_str = clean_row[2]
-            elif len(clean_row) == 2:
-                merchant = clean_row[0]
-                amount_str = clean_row[1]
+        # Check duplicate hash against DB and current batch
+        row_hash = compute_tx_hash(
+            current_user.id,
+            validated_row.date,
+            validated_row.merchant,
+            float(validated_row.amount),
+            validated_row.category,
+        )
 
-            if not merchant:
-                errors.append(CSVImportErrorDetail(row=row_idx, reason="Missing merchant/description"))
-                continue
+        if row_hash in existing_hashes or row_hash in batch_hashes:
+            errors.append(
+                CSVImportErrorDetail(
+                    row=row_idx,
+                    reason="duplicate of existing transaction",
+                )
+            )
+            continue
 
-            clean_amt = amount_str.replace("$", "").replace(",", "").strip()
-            if not clean_amt:
-                errors.append(CSVImportErrorDetail(row=row_idx, reason="Missing transaction amount"))
-                continue
+        batch_hashes.add(row_hash)
 
-            try:
-                amount = float(clean_amt)
-            except ValueError:
-                errors.append(CSVImportErrorDetail(row=row_idx, reason=f"Invalid numeric amount format: '{amount_str}'"))
-                continue
-
-            # Validate date
-            is_valid_date, formatted_date = parse_and_validate_date(date_str)
-            if not is_valid_date:
-                errors.append(CSVImportErrorDetail(row=row_idx, reason=f"Invalid date format: '{date_str}'"))
-                continue
-
-            cat_id = get_or_create_category_id(db, current_user.id, category_name)
+        try:
+            cat_id = get_or_create_category_id(db, current_user.id, validated_row.category)
             tx = Transaction(
                 user_id=current_user.id,
                 category_id=cat_id,
-                merchant=merchant,
-                date=formatted_date,
-                amount=amount,
-                icon="cloud_upload",
+                merchant=validated_row.merchant,
+                date=validated_row.date,
+                amount=float(validated_row.amount),
+                icon=validated_row.icon or "cloud_upload",
+                is_flagged=False,
             )
             db.add(tx)
             db.commit()
@@ -334,7 +424,7 @@ async def import_csv_transactions(
                 TransactionResponse(
                     id=tx.id,
                     merchant=tx.merchant,
-                    category=category_name,
+                    category=validated_row.category,
                     date=tx.date,
                     amount=tx.amount,
                     icon=tx.icon,
@@ -342,6 +432,11 @@ async def import_csv_transactions(
             )
         except Exception as e:
             db.rollback()
-            errors.append(CSVImportErrorDetail(row=row_idx, reason=f"Failed to parse row: {e!s}"))
+            errors.append(CSVImportErrorDetail(row=row_idx, reason=f"Failed to persist row: {e!s}"))
 
-    return CSVImportResponse(created=created, errors=errors)
+    return CSVImportResponse(
+        imported=len(created),
+        skipped=len(errors),
+        created=created,
+        errors=errors,
+    )

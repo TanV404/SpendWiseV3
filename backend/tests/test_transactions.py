@@ -103,6 +103,8 @@ def test_csv_import_with_invalid_date_filtering(client):
 Target,Groceries,-45.50,May 15 2024
 Bad Row Bad Date,Shopping,-20.00,not-a-date
 Bad Row Missing Amount,Groceries,,June 10 2024
+Big Purchase,Shopping,-999999999.99,May 15 2024
+Positive Extreme,Income,1500000.00,May 15 2024
 Netflix,Entertainment,-15.99,2024-05-01
 """
 
@@ -110,10 +112,16 @@ Netflix,Entertainment,-15.99,2024-05-01
     assert res.status_code == 200
     data = res.json()
 
-    # Should successfully create 2 valid transactions and report 2 errors
+    # Should successfully create 2 valid transactions (Target, Netflix) and report 4 errors
+    assert data["imported"] == 2
+    assert data["skipped"] == 4
     assert len(data["created"]) == 2
-    assert len(data["errors"]) == 2
-    assert any("Invalid date format" in err["reason"] for err in data["errors"])
+    assert len(data["errors"]) == 4
+
+    error_reasons = [err["reason"] for err in data["errors"]]
+    assert any("Invalid date format" in reason for reason in error_reasons)
+    assert any("Missing transaction amount" in reason for reason in error_reasons)
+    assert any("exceeds allowed boundary" in reason for reason in error_reasons)
 
     # Verify transactions in database
     txs = client.get("/transactions", headers=headers).json()
@@ -121,4 +129,61 @@ Netflix,Entertainment,-15.99,2024-05-01
     merchants = [t["merchant"] for t in txs]
     assert "Target" in merchants
     assert "Netflix" in merchants
+    assert "Big Purchase" not in merchants
+    assert "Positive Extreme" not in merchants
     assert "Bad Row Bad Date" not in merchants
+
+
+def test_csv_import_duplicate_detection(client):
+    reg = client.post(
+        "/auth/register",
+        json={"email": "dupuser@example.com", "password": "password123", "name": "Dup User"},
+    ).json()
+    headers = {"Authorization": f"Bearer {reg['access_token']}"}
+
+    csv_batch1 = """Merchant,Category,Amount,Date
+Whole Foods,Groceries,-60.00,May 15 2024
+Trader Joes,Groceries,-30.00,May 16 2024
+"""
+    res1 = client.post("/transactions/import", json={"raw_csv": csv_batch1}, headers=headers)
+    assert res1.status_code == 200
+    assert res1.json()["imported"] == 2
+    assert res1.json()["skipped"] == 0
+
+    # Re-importing same batch + duplicate within the batch
+    csv_batch2 = """Merchant,Category,Amount,Date
+Whole Foods,Groceries,-60.00,May 15 2024
+Coffee Shop,Dining Out,-5.00,May 17 2024
+Coffee Shop,Dining Out,-5.00,May 17 2024
+"""
+    res2 = client.post("/transactions/import", json={"raw_csv": csv_batch2}, headers=headers)
+    assert res2.status_code == 200
+    data2 = res2.json()
+    # 1 imported (Coffee Shop 1), 2 skipped (Whole Foods duplicate of existing, Coffee Shop 2 duplicate of batch)
+    assert data2["imported"] == 1
+    assert data2["skipped"] == 2
+    assert any("duplicate of existing transaction" in err["reason"] for err in data2["errors"])
+
+
+def test_manual_transaction_10s_duplicate_rejection(client):
+    reg = client.post(
+        "/auth/register",
+        json={"email": "manualdup@example.com", "password": "password123", "name": "Manual Dup"},
+    ).json()
+    headers = {"Authorization": f"Bearer {reg['access_token']}"}
+
+    tx_data = {
+        "merchant": "Starbucks",
+        "category": "Dining Out",
+        "amount": -6.50,
+        "date": "2024-05-15",
+    }
+
+    # 1. First submission succeeds
+    res1 = client.post("/transactions", json=tx_data, headers=headers)
+    assert res1.status_code == 201
+
+    # 2. Immediate second submission within 10s is rejected as 409 Conflict
+    res2 = client.post("/transactions", json=tx_data, headers=headers)
+    assert res2.status_code == 409
+    assert "Duplicate transaction detected" in res2.json()["detail"]

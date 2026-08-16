@@ -89,8 +89,22 @@ def create_recurring(
         )
         if cat:
             cat_id = cat.id
+    # Compute upcoming future due date if not provided or if same as start date
+    start_dt = parse_date_safely(item_in.date) or datetime.now()
+    days_to_add = int(item_in.interval_days or 30)
+    if item_in.frequency == "weekly":
+        days_to_add = 7
+    elif item_in.frequency == "biweekly":
+        days_to_add = 14
+    elif item_in.frequency == "monthly":
+        days_to_add = 30
+    elif item_in.frequency == "yearly":
+        days_to_add = 365
 
-    due = item_in.next_expected_date or item_in.dueDate or item_in.date
+    due = item_in.next_expected_date or item_in.next_due_date or item_in.dueDate
+    if not due or due == item_in.date:
+        from datetime import timedelta
+        due = (start_dt + timedelta(days=days_to_add)).strftime("%b %d, %Y")
 
     item = RecurringItem(
         user_id=current_user.id,
@@ -102,7 +116,7 @@ def create_recurring(
         next_due_date=due,
         next_expected_date=due,
         icon=item_in.icon or "subscriptions",
-        interval_days=item_in.interval_days or 30,
+        interval_days=days_to_add,
         detected_automatically=False,
     )
     db.add(item)
@@ -120,7 +134,7 @@ def create_recurring(
         dueDate=due,
         category=item_in.category or "Subscriptions",
         icon=item.icon,
-        interval_days=item.interval_days,
+        interval_days=days_to_add,
         detected_automatically=False,
     )
 

@@ -1,171 +1,194 @@
-# 💳 SpendWise — Personal Finance Tracker
+# SpendWise
 
-**SpendWise** is a full-stack personal finance and budgeting platform designed to deliver real-time financial tracking, automated recurring subscription detection, smart spending pace forecasting, and secure multi-user data isolation.
+A full-stack personal finance tracker for managing transactions, budgets, savings goals, and recurring subscriptions — with CSV import, real-time dashboard analytics, and transactional email alerts.
 
-Built with a high-performance **React + TypeScript** frontend and a robust **FastAPI + PostgreSQL + SQLAlchemy 2.0** backend.
-
----
-
-## ✨ Features
-
-- **📊 Dynamic Dashboard & KPI Cards**:
-  - Real-time **Total Balance**, **Current Spend**, **Savings Goal**, and **Budget Left** metric tiles.
-  - Zero-state handling for unset budgets and goals with inline modal triggers.
-  - Interactive spending distribution pie chart and weekly breakdown analysis.
-
-- **🎯 Smart Budgeting & Forecasting**:
-  - Dynamic monthly budget limits with customizable Essential / Discretionary splits.
-  - Linear extrapolation engine calculating **daily burn rate**, **projected month-end total**, **over-budget risk**, and **days until budget exhaustion**.
-
-- **🔄 Automated Recurring Subscription Detection**:
-  - Automated heuristic scanning transaction intervals (Weekly, Bi-weekly, Monthly, Yearly) within amount consistency tolerances ($\pm 10\%$).
-  - Auto-upserting recurring items with due date scheduling.
-
-- **📂 CSV Transaction Statement Importer**:
-  - Pre-import validation engine enforcing header column presence (`Merchant`, `Category`, `Amount`, `Date`), numeric amounts, and multi-format date parsing.
-  - Visual preview table with row-by-row error auditing and automatic fallback mapping for unmatched categories to `"Other"`.
-
-- **🔐 Robust Authentication & Multi-Tenancy**:
-  - JWT authentication (`HS256`) with short-lived access tokens (60 min) and refresh tokens (7 days).
-  - Google OAuth single sign-on & account linking.
-  - Strict database query isolation (`user_id == current_user.id`), returning `404 Not Found` for unauthorized resource access.
-
-- **🗂 Safe Category Management**:
-  - Custom category creation and renaming.
-  - `ON DELETE SET NULL` cascade behavior ensuring user transaction history is never deleted when categories are removed.
+**Live demo:** [your-vercel-url.vercel.app](#)  
+**API docs:** [your-render-url.onrender.com/docs](#)
 
 ---
 
-## 🛠 Tech Stack
+## Features
 
-| Layer | Technologies |
-|---|---|
-| **Frontend** | React 18, TypeScript, Vite, Tailwind CSS / Vanilla CSS, Material Symbols |
-| **Backend** | FastAPI (Async Python 3.11+), Pydantic v2, Python-Jose (JWT), Passlib (Bcrypt) |
-| **Database** | PostgreSQL 15, SQLAlchemy 2.0 (ORM), Alembic (Migrations) |
-| **Testing & Quality** | Pytest, Pytest-Asyncio, Ruff Linter, TypeScript Compiler (`tsc`) |
-| **DevOps & CI/CD** | Docker, Docker Compose, GitHub Actions CI, Render Blueprint (`render.yaml`) |
+- **Transaction management** — Add, edit, delete, search, and export to CSV.
+- **CSV import** — Row-level validation (type checking, amount range enforcement `|amount| < 1,000,000`, duplicate detection via content hashing), and a detailed import summary.
+- **Budget tracking** — Set monthly limits per category and overall limits, with distinct empty states (*"No budget set"* vs. *"Budget fully spent"*).
+- **Savings goals** — Track net retained savings progress toward a target goal with visual progress rings.
+- **Recurring subscriptions** — Automatic next-due-date calculation, cadence tracking, and renewal management.
+- **Email notifications via Resend** — Dynamic budget threshold warnings, recurring subscription alerts, and weekly spending digests with idempotent delivery (`alerts_sent` uniqueness).
+- **Dashboard analytics** — Spending by category (donut pie chart with top 5 categories + Others), spend vs. budget forecast, daily burn rate, and outlier-safe KPI cards.
+- **JWT authentication** — Secure password hashing with bcrypt, token refresh, and user-isolated multi-tenant data structures.
 
 ---
 
-## 🚀 Quick Start
+## Tech Stack
 
-### Option 1: Run with Docker Compose (Recommended)
+### Backend
+- **FastAPI** (Python 3.11+)
+- **PostgreSQL** + **SQLAlchemy** + **Alembic** (migrations)
+- **JWT** (Jose / Cryptography) authentication
+- **Resend** (Transactional email with Jinja2 responsive templates)
+- **Pytest** (Automated integration & unit test suite)
+- **Docker** & **Docker Compose**
 
-Launch the entire stack (PostgreSQL + FastAPI Backend) in a single command:
+### Frontend
+- **React 18** + **TypeScript**
+- **Vite** + **Tailwind CSS**
+- **Lucide Icons** & **Material Symbols**
+- **Recharts** (Interactive Donut & Trend charts)
+- **Vitest** (Unit tests)
+
+### Infra / Deployment
+- **Backend & Database**: Render (FastAPI + Managed PostgreSQL)
+- **Frontend**: Vercel (Static SPA build)
+- **CI/CD**: GitHub Actions (Linting, automated tests, migration sync checks)
+
+---
+
+## Architecture
+
+```text
+spendwise/
+├── frontend/                     # React + TypeScript SPA
+│   ├── src/
+│   │   ├── components/           # UI Bento Cards, Charts & Modals
+│   │   ├── types.ts              # Shared TypeScript definitions
+│   │   └── api.ts                # Typed ApiError client
+│   ├── index.html
+│   ├── vite.config.ts
+│   └── package.json
+├── backend/                      # FastAPI Backend
+│   ├── alembic/                  # Versioned DB migrations (001 - 006)
+│   ├── app/
+│   │   ├── models.py             # SQLAlchemy ORM models & constraints
+│   │   ├── schemas.py            # Pydantic validation schemas
+│   │   ├── routers/              # API endpoints (Auth, Tx, Budgets, Recurring, Alerts)
+│   │   ├── services/             # Business logic & Resend email engine
+│   │   └── main.py               # Application entrypoint
+│   ├── tests/                    # 18 passing Pytest test suites
+│   ├── requirements.txt
+│   └── Dockerfile
+├── docker-compose.yml
+├── .env.example
+└── README.md
+```
+
+Frontend and backend are decoupled — the frontend is a static bundle served from Vercel, and the backend is a FastAPI service talking to a managed PostgreSQL instance.
+
+---
+
+## Getting Started
+
+### Prerequisites
+- Python 3.11+
+- Node.js 18+ & npm
+- PostgreSQL (or Docker)
+- A [Resend](https://resend.com) API key (for transactional email features)
+
+---
+
+### 1. Backend Setup
+
+```bash
+cd backend
+
+# Create and activate virtual environment
+python3 -m venv venv
+source venv/bin/activate  # Windows: venv\Scripts\activate
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Configure environment variables
+cp ../.env.example .env
+# Edit .env and specify DATABASE_URL, JWT_SECRET, RESEND_API_KEY
+
+# Run database migrations
+DATABASE_URL=postgresql://localhost:5432/spendwise alembic upgrade head
+
+# Start FastAPI server
+uvicorn app.main:app --reload --port 8000
+```
+- **Backend API**: `http://localhost:8000`
+- **Interactive Swagger Docs**: `http://localhost:8000/docs`
+
+---
+
+### 2. Frontend Setup
+
+```bash
+cd frontend
+
+# Install packages
+npm install
+
+# Start Vite development server
+npm run dev
+```
+- **Web App**: `http://localhost:5173` (or `http://localhost:3000`)
+
+---
+
+### 3. Run with Docker Compose
+
+To launch the full stack (PostgreSQL + FastAPI Backend) in a single command:
 
 ```bash
 docker-compose up --build
 ```
 
-- **Frontend**: Run `npm install && npm run dev` (available at `http://localhost:5173`)
-- **Backend API**: `http://localhost:8000`
-- **Swagger Interactive Docs**: `http://localhost:8000/docs`
-- **PostgreSQL Database**: `localhost:5432`
-
 ---
 
-### Option 2: Local Development Setup
+## Environment Variables
 
-#### 1. Backend Setup
-```bash
-cd backend
+### Backend (`backend/.env` or root `.env`)
 
-# Create and activate Python virtual environment
-python3 -m venv venv
-source venv/bin/activate
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Run database migrations
-DATABASE_URL=sqlite:///./dev.db alembic upgrade head
-
-# Start FastAPI server
-DATABASE_URL=sqlite:///./dev.db uvicorn app.main:app --reload --port 8000
-```
-
-#### 2. Frontend Setup
-```bash
-# In the project root directory
-npm install
-npm run dev
-```
-
-The web application will open at `http://localhost:5173`.
-
----
-
-## 📡 API Contract Overview
-
-| Method | Route | Description |
+| Variable | Description | Example |
 |---|---|---|
-| `POST` | `/auth/register` | Register new user account |
-| `POST` | `/auth/login` | Login with email & password (JSON & OAuth2 form compatible) |
-| `POST` | `/auth/google` | Google OAuth account authentication |
-| `POST` | `/auth/refresh` | Refresh expired access token |
-| `GET` | `/auth/me` | Retrieve authenticated user profile |
-| `GET` | `/transactions` | List user transactions (sorted chronologically) |
-| `POST` | `/transactions` | Create transaction record |
-| `PATCH` | `/transactions/{id}` | Update transaction details |
-| `DELETE` | `/transactions/{id}` | Delete transaction |
-| `POST` | `/transactions/import` | Validate and batch import CSV statement |
-| `GET` | `/categories` | List user categories |
-| `POST` | `/categories` | Create custom category |
-| `PATCH` | `/categories/{id}` | Rename category |
-| `DELETE` | `/categories/{id}` | Delete category (reassigns transactions to `"Other"`) |
-| `GET` | `/recurring` | List recurring subscriptions |
-| `POST` | `/recurring` | Add recurring subscription |
-| `PATCH` | `/recurring/{id}` | Update recurring item |
-| `DELETE` | `/recurring/{id}` | Delete recurring item |
-| `POST` | `/recurring/detect` | Run automated recurring pattern detection |
-| `POST` | `/budgets` | Upsert monthly budget allocation |
-| `GET` | `/budgets/status` | Precomputed budget spend, limits, and remaining balance |
-| `GET` | `/budgets/forecast` | Spending pace forecast, burn rate, and over-budget risk |
-| `GET` | `/health` | Service health status check |
+| `DATABASE_URL` | PostgreSQL connection string | `postgresql://user:pass@localhost:5432/spendwise` |
+| `JWT_SECRET` | Secret key for signing auth tokens | `f1cdc2b6b3f74c0dfb7516c9bba38...` |
+| `JWT_ALGORITHM` | JWT signing algorithm | `HS256` |
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | Access token lifespan | `60` |
+| `REFRESH_TOKEN_EXPIRE_DAYS` | Refresh token lifespan | `7` |
+| `RESEND_API_KEY` | Resend API Key | `re_123456789...` |
+| `RESEND_FROM_EMAIL` | Verified sender address | `onboarding@resend.dev` |
+
+### Frontend (`frontend/.env`)
+
+| Variable | Description | Example |
+|---|---|---|
+| `VITE_API_BASE_URL` | Backend API base URL | `http://localhost:8000` |
 
 ---
 
 ## 🧪 Testing & Code Quality
 
-### Backend Automated Test Suite
+### Backend Test Suite (Pytest)
 ```bash
 cd backend
-PYTHONPATH=. ./venv/bin/pytest -v
+source venv/bin/activate
+pytest -v
 ```
-- Tests cover registration, login, Google auth, transaction CRUD, category cascade safety, recurring detection heuristics, forecast burn rates, and user data isolation (404 barriers).
+- **18 automated tests** covering Authentication, Budgeting & Aggregations, Categories & Cascade safety, Forecasting burn rates, Email notifications, Recurring cadence detection, Outlier filtering, and Duplicate ingestion detection.
 
-### Backend Linter
+### Frontend Test Suite & Linting
 ```bash
-cd backend
-./venv/bin/ruff check .
-```
-
-### Frontend Typecheck & Production Build
-```bash
-# In project root
-npm run lint
-npm run build
+cd frontend
+npm test                # Vitest unit test suite (6/6 tests passing)
+npx tsc --noEmit        # TypeScript type checker (0 errors)
+npm run build           # Production bundle build
 ```
 
 ---
 
-## 🚢 CI/CD & Deployment
+## 🗺️ Roadmap
 
-### GitHub Actions CI
-The workflow in `.github/workflows/backend-ci.yml` runs automatically on pushes and pull requests to `main`:
-1. Spins up a PostgreSQL service container.
-2. Applies all Alembic migrations (`alembic upgrade head`).
-3. Executes Ruff linter checks.
-4. Runs the complete `pytest` test suite.
-
-### Render Cloud Deployment
-This project includes a turnkey [`render.yaml`](file:///Users/tanvi/Desktop/spendwise_new/render.yaml) Blueprint:
-1. Connect your repository on [Render](https://render.com).
-2. Render provisions a managed PostgreSQL database and the FastAPI web service automatically.
-3. Database migrations run seamlessly during the build step.
+- [ ] Auto-detection of recurring subscriptions from transaction history
+- [ ] Multi-currency & foreign exchange support
+- [ ] Shared / household multi-user budgets
 
 ---
 
-## 📄 License
-MIT License. Built with ❤️ for seamless personal financial tracking.
+## Author
+
+**Tanvi Pathare**  
+[Portfolio](https://tanvi-pathare.vercel.app/) · [GitHub](https://github.com/TanV404)
