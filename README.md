@@ -52,11 +52,11 @@ The frontend provides the dashboard and financial management interface. FastAPI 
 
 ## 🧰 Tech Stack
 
-**Frontend:** React 18, TypeScript, Vite, Tailwind CSS, Recharts, Vitest
+**Frontend:** React.js, TypeScript, Vite, Tailwind CSS, Recharts, Vitest
 
 **Backend:** FastAPI, Python 3.11+, PostgreSQL, SQLAlchemy, Alembic, JWT, bcrypt, Pytest
 
-**Infrastructure:** Docker, Docker Compose, Render, Vercel, GitHub Actions
+**Infrastructure:** Docker, Docker Compose, Render, Neon, Vercel, GitHub Actions
 
 ## 🧪 Testing
 
@@ -70,7 +70,7 @@ The frontend provides the dashboard and financial management interface. FastAPI 
 ```text
 Frontend  → Vercel
 Backend   → Render
-Database  → Render PostgreSQL
+Database  → Neon PostgreSQL
 CI/CD     → GitHub Actions
 Email     → Resend
 ```
