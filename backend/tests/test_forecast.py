@@ -1,3 +1,6 @@
+from datetime import datetime
+
+
 def test_budget_forecasting(client):
     reg = client.post(
         "/auth/register",
@@ -13,15 +16,17 @@ def test_budget_forecasting(client):
         headers=headers,
     )
 
+    cur_date = datetime.now().strftime("%b %d, %Y")
+
     # Add significant expenses in current month
     client.post(
         "/transactions",
-        json={"merchant": "Tech Store", "category": "Shopping", "date": "May 02, 2024", "amount": -200.0},
+        json={"merchant": "Tech Store", "category": "Shopping", "date": cur_date, "amount": -200.0},
         headers=headers,
     )
     client.post(
         "/transactions",
-        json={"merchant": "Restaurant", "category": "Dining Out", "date": "May 03, 2024", "amount": -150.0},
+        json={"merchant": "Restaurant", "category": "Dining Out", "date": cur_date, "amount": -150.0},
         headers=headers,
     )
 

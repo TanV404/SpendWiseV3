@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Transaction } from '../types';
+import { DateFilterType, matchesDateFilter } from '../utils/formatters';
 
 interface RecentTransactionsProps {
   transactions: Transaction[];
@@ -27,6 +28,9 @@ export const RecentTransactions: React.FC<RecentTransactionsProps> = ({
   onOpenEditCategories,
 }) => {
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
+  const [dateFilter, setDateFilter] = useState<DateFilterType>('ALL');
+  const [customStartDate, setCustomStartDate] = useState<string>('');
+  const [customEndDate, setCustomEndDate] = useState<string>('');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
   // Filter transactions
@@ -38,7 +42,9 @@ export const RecentTransactions: React.FC<RecentTransactionsProps> = ({
 
     const matchesCategory = selectedCategory === 'All' || tx.category === selectedCategory;
 
-    return matchesSearch && matchesCategory;
+    const matchesDate = matchesDateFilter(tx.date, dateFilter, customStartDate, customEndDate);
+
+    return matchesSearch && matchesCategory && matchesDate;
   });
 
   const allSelected = filtered.length > 0 && filtered.every((tx) => selectedIds.includes(tx.id));
@@ -123,6 +129,9 @@ export const RecentTransactions: React.FC<RecentTransactionsProps> = ({
             {filtered.length > 0
               ? `Showing ${startIndex + 1}–${endIndex} of ${filtered.length} transactions`
               : '0 transactions'}
+            {(selectedCategory !== 'All' || dateFilter !== 'ALL' || searchQuery) && (
+              <span className="ml-1.5 text-[#93c5fd] font-semibold">(filtered)</span>
+            )}
           </p>
         </div>
 
@@ -162,9 +171,9 @@ export const RecentTransactions: React.FC<RecentTransactionsProps> = ({
               setSelectedCategory(e.target.value);
               setCurrentPage(1);
             }}
-            className="px-3 py-2 bg-[#1c2b3c] text-[#d4e4fa] border border-[#464555]/30 rounded-xl text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-[#93c5fd] grow sm:grow-0"
+            className="px-3 py-2 bg-[#1c2b3c] text-[#d4e4fa] border border-[#464555]/30 rounded-xl text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-[#93c5fd] grow sm:grow-0 cursor-pointer"
           >
-            <option value="All">Filter Category: All</option>
+            <option value="All">Category: All</option>
             {categories.map((cat) => (
               <option key={cat} value={cat}>
                 {cat}
@@ -172,14 +181,31 @@ export const RecentTransactions: React.FC<RecentTransactionsProps> = ({
             ))}
           </select>
 
+          {/* Date Filter Dropdown */}
+          <select
+            value={dateFilter}
+            onChange={(e) => {
+              setDateFilter(e.target.value as DateFilterType);
+              setCurrentPage(1);
+            }}
+            className="px-3 py-2 bg-[#1c2b3c] text-[#d4e4fa] border border-[#464555]/30 rounded-xl text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-[#93c5fd] grow sm:grow-0 cursor-pointer"
+          >
+            <option value="ALL">Date: All Time</option>
+            <option value="THIS_MONTH">Date: This Month</option>
+            <option value="LAST_MONTH">Date: Last Month</option>
+            <option value="THIS_YEAR">Date: This Year</option>
+            <option value="LAST_30_DAYS">Date: Last 30 Days</option>
+            <option value="LAST_90_DAYS">Date: Last 90 Days</option>
+            <option value="CUSTOM">Date: Custom Range...</option>
+          </select>
+
           {/* Edit Categories Button */}
           <button
             onClick={onOpenEditCategories}
-            className="px-3.5 py-2 bg-[#1c2b3c] text-[#d4e4fa] hover:bg-[#2c3a4c] border border-[#464555]/30 rounded-xl text-xs font-semibold transition-colors flex items-center gap-1.5 cursor-pointer shadow-sm grow sm:grow-0"
+            className="p-2.5 bg-[#1c2b3c] text-[#d4e4fa] hover:bg-[#2c3a4c] border border-[#464555]/30 rounded-xl text-xs font-semibold transition-colors flex items-center justify-center cursor-pointer shadow-sm grow sm:grow-0"
             title="Edit and manage transaction categories"
           >
             <span className="material-symbols-outlined text-sm text-[#bfdbfe]">edit_note</span>
-            <span>Edit Categories</span>
           </button>
 
           {/* Bulk Delete Action */}
@@ -196,9 +222,10 @@ export const RecentTransactions: React.FC<RecentTransactionsProps> = ({
           {/* Export Button */}
           <button
             onClick={onExportCSV}
-            className="px-3 py-2 bg-[#1c2b3c] text-[#d4e4fa] hover:bg-[#2c3a4c] rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 border border-[#464555]/20 cursor-pointer"
+            className="p-2.5 bg-[#1c2b3c] text-[#d4e4fa] hover:bg-[#2c3a4c] rounded-xl text-xs font-bold transition-all flex items-center justify-center border border-[#464555]/20 cursor-pointer"
+            title="Export CSV"
           >
-            <span className="material-symbols-outlined text-sm">download</span> Export
+            <span className="material-symbols-outlined text-sm">download</span>
           </button>
 
           {/* Add Transaction Button */}
@@ -210,6 +237,49 @@ export const RecentTransactions: React.FC<RecentTransactionsProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Custom Date Range Bar */}
+      {dateFilter === 'CUSTOM' && (
+        <div className="flex flex-wrap items-center gap-3 mb-5 p-3 rounded-xl bg-[#122131] border border-[#464555]/25 animate-fade">
+          <div className="flex items-center gap-2">
+            <span className="material-symbols-outlined text-sm text-[#93c5fd]">calendar_month</span>
+            <span className="text-xs text-[#c7c4d8] font-mono-data font-semibold">From:</span>
+            <input
+              type="date"
+              value={customStartDate}
+              onChange={(e) => {
+                setCustomStartDate(e.target.value);
+                setCurrentPage(1);
+              }}
+              className="px-2.5 py-1.5 bg-[#1c2b3c] text-[#d4e4fa] border border-[#464555]/30 rounded-lg text-xs font-mono-data focus:outline-none focus:ring-1 focus:ring-[#93c5fd]"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-[#c7c4d8] font-mono-data font-semibold">To:</span>
+            <input
+              type="date"
+              value={customEndDate}
+              onChange={(e) => {
+                setCustomEndDate(e.target.value);
+                setCurrentPage(1);
+              }}
+              className="px-2.5 py-1.5 bg-[#1c2b3c] text-[#d4e4fa] border border-[#464555]/30 rounded-lg text-xs font-mono-data focus:outline-none focus:ring-1 focus:ring-[#93c5fd]"
+            />
+          </div>
+          {(customStartDate || customEndDate) && (
+            <button
+              onClick={() => {
+                setCustomStartDate('');
+                setCustomEndDate('');
+                setCurrentPage(1);
+              }}
+              className="text-xs text-[#93c5fd] hover:text-white underline font-semibold cursor-pointer ml-auto sm:ml-2"
+            >
+              Clear Range
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Responsive Table Wrapper with Vertical & Horizontal Custom Scrollbars */}
       <div className="w-full max-h-[460px] overflow-auto custom-scrollbar border border-[#464555]/15 rounded-xl bg-[#091624]">

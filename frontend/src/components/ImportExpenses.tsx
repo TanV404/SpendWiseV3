@@ -10,7 +10,7 @@ export const ImportExpenses: React.FC<ImportExpensesProps> = ({ onUploadCSV }) =
       <div>
         <h3 className="text-xl font-bold text-[#d4e4fa] mb-1 tracking-tight">Import Expenses</h3>
         <p className="text-sm text-[#c7c4d8]/80 font-normal mb-6">
-          Instantly sync your offline transactions
+          Instantly sync your transactions
         </p>
       </div>
 

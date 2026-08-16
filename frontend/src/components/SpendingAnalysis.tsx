@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { ChartTimeframe, Transaction } from '../types';
+import { parseTransactionDate } from '../utils/formatters';
 
 interface SpendingAnalysisProps {
   transactions: Transaction[];
@@ -17,10 +18,11 @@ export const SpendingAnalysis: React.FC<SpendingAnalysisProps> = ({ transactions
   const [timeframe, setTimeframe] = useState<ChartTimeframe>('monthly');
   const [activeBar, setActiveBar] = useState<{ label: string; type: string; value: number } | null>(null);
 
+  const currentYear = new Date().getFullYear();
+
   // Compute Income vs Expense dataset strictly from transactions
   const getDataset = (): { items: IncomeExpenseBarData[]; totalActivity: number } => {
     let labels: string[] = [];
-    const currentYear = new Date().getFullYear();
 
     if (timeframe === 'yearly') {
       // Last 6 years ending in current year (e.g. 2021, 2022, 2023, 2024, 2025, 2026)
@@ -36,32 +38,19 @@ export const SpendingAnalysis: React.FC<SpendingAnalysisProps> = ({ transactions
       let labelExpense = 0;
 
       transactions.forEach((tx) => {
-        if (!tx.date) return;
-        const dStr = tx.date.toUpperCase();
-        
+        if (!tx.date || Math.abs(tx.amount) >= 1_000_000) return;
+        const d = parseTransactionDate(tx.date);
+        if (!d) return;
+
         let matches = false;
         if (timeframe === 'yearly') {
-          if (dStr.includes(lbl)) {
+          if (String(d.getFullYear()) === lbl) {
             matches = true;
-          } else {
-            try {
-              const d = new Date(tx.date);
-              if (!isNaN(d.getTime()) && String(d.getFullYear()) === lbl) {
-                matches = true;
-              }
-            } catch {}
           }
         } else {
-          // Check for 3-letter month abbr or parsed month index
-          if (dStr.includes(lbl)) {
+          // Monthly view: strictly matches current year and month index
+          if (d.getFullYear() === currentYear && d.getMonth() === mIdx) {
             matches = true;
-          } else {
-            try {
-              const d = new Date(tx.date);
-              if (!isNaN(d.getTime()) && d.getMonth() === mIdx) {
-                matches = true;
-              }
-            } catch {}
           }
         }
 
@@ -109,7 +98,9 @@ export const SpendingAnalysis: React.FC<SpendingAnalysisProps> = ({ transactions
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
         <div>
           <h3 className="text-xl font-bold text-[#d4e4fa] tracking-tight">Spending Analysis</h3>
-          <p className="text-sm text-[#c7c4d8]/80 font-normal mt-0.5">Income vs Expense comparison</p>
+          <p className="text-sm text-[#c7c4d8]/80 font-normal mt-0.5">
+            {timeframe === 'monthly' ? `Monthly breakdown (${currentYear})` : 'Multi-year comparison'}
+          </p>
         </div>
 
         {/* Toggle Group */}

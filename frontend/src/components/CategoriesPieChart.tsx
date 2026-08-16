@@ -1,14 +1,17 @@
 import React from 'react';
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts';
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
 import { Transaction } from '../types';
+import { isCurrentMonthAndYear } from '../utils/formatters';
 
 interface CategoriesPieChartProps {
   transactions: Transaction[];
 }
 
 export const CategoriesPieChart: React.FC<CategoriesPieChartProps> = ({ transactions }) => {
-  // Aggregate expenses across all active transactions
-  const activeExpenses = transactions.filter((tx) => tx.amount < 0 && Math.abs(tx.amount) < 1_000_000);
+  // Aggregate expenses strictly for the current month
+  const activeExpenses = transactions.filter(
+    (tx) => tx.amount < 0 && Math.abs(tx.amount) < 1_000_000 && isCurrentMonthAndYear(tx.date)
+  );
 
   const dataMap = activeExpenses.reduce((acc, tx) => {
     const val = Math.abs(tx.amount);
@@ -52,7 +55,7 @@ export const CategoriesPieChart: React.FC<CategoriesPieChartProps> = ({ transact
     <div className="col-span-12 lg:col-span-4 bento-card bg-[#122131] p-6 animate-fade flex flex-col justify-between">
       <div className="mb-2">
         <h3 className="text-xl font-bold text-[#d4e4fa] tracking-tight">Top Categories</h3>
-        <p className="text-sm text-[#c7c4d8]/80 font-normal mt-0.5">Monthly expense breakdown</p>
+        <p className="text-sm text-[#c7c4d8]/80 font-normal mt-0.5">Current month breakdown</p>
       </div>
 
       <div className="flex flex-col sm:flex-row items-center gap-4 my-auto">

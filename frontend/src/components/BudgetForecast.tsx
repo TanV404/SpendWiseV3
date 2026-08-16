@@ -1,50 +1,150 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useMemo } from 'react';
 import { ForecastResponse, Transaction } from '../types';
-import { apiFetch } from '../api';
-import { formatSmartCurrency } from '../utils/formatters';
+import {
+  formatSmartCurrency,
+  isCurrentMonthAndYear,
+  parseTransactionDate,
+} from '../utils/formatters';
 
 interface BudgetForecastProps {
   transactions?: Transaction[];
   totalBudgetLimit?: number;
 }
 
-export const BudgetForecast: React.FC<BudgetForecastProps> = ({ transactions = [], totalBudgetLimit = 0 }) => {
-  const [forecast, setForecast] = useState<ForecastResponse | null>(null);
-
-  // Compute local fallback forecast when running in guest mode or offline
-  const localForecast = useMemo<ForecastResponse>(() => {
+export const BudgetForecast: React.FC<BudgetForecastProps> = ({
+  transactions = [],
+  totalBudgetLimit = 0,
+}) => {
+  const forecast = useMemo<ForecastResponse>(() => {
     const now = new Date();
-    const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
-    const daysElapsed = Math.max(1, now.getDate());
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth();
 
+    /*
+     * Upcoming month
+     */
+    const upcomingMonthYear =
+      currentMonth === 11 ? currentYear + 1 : currentYear;
+
+    const upcomingMonth =
+      currentMonth === 11 ? 0 : currentMonth + 1;
+
+    const daysInUpcomingMonth = new Date(
+      upcomingMonthYear,
+      upcomingMonth + 1,
+      0
+    ).getDate();
+
+    /*
+     * 1. CURRENT SPEND
+     *
+     * Only expenses from the current calendar month.
+     * This should match the Current Spend KPI.
+     */
     const currentMonthExpenses = transactions.filter((tx) => {
-      if (tx.amount >= 0) return false;
-      if (!tx.date) return true;
-      try {
-        const d = new Date(tx.date);
-        return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
-      } catch {
-        return true;
+      if (tx.amount >= 0 || Math.abs(tx.amount) >= 1_000_000) {
+        return false;
       }
+
+      return isCurrentMonthAndYear(tx.date);
     });
 
-    const totalSpent = currentMonthExpenses.reduce((acc, tx) => acc + Math.abs(tx.amount), 0);
-    const isInsufficient = daysElapsed < 3 || (currentMonthExpenses.length < 3 && totalSpent === 0);
+    const currentSpend = currentMonthExpenses.reduce(
+      (total, tx) => total + Math.abs(tx.amount),
+      0
+    );
 
-    const dailyBurnRate = roundVal(totalSpent / daysElapsed);
-    const projectedTotal = !isInsufficient ? roundVal(dailyBurnRate * daysInMonth) : null;
-    const remainingBudget = Math.max(0, totalBudgetLimit - totalSpent);
+    /*
+     * 2. PROJECTED SPEND
+     *
+     * Average monthly expenses across ALL historical months
+     * that contain expense data.
+     *
+     * Example:
+     * Jan 2024 = $2,000
+     * Feb 2024 = $3,000
+     * Aug 2025 = $4,000
+     *
+     * Projected Spend = (2000 + 3000 + 4000) / 3
+     */
+    const expensesByMonth: Record<string, number> = {};
 
-    let status: 'UNDER_BUDGET' | 'NEAR_BUDGET' | 'OVER_BUDGET' = 'UNDER_BUDGET';
-    if (projectedTotal !== null && totalBudgetLimit > 0) {
-      if (projectedTotal > totalBudgetLimit) status = 'OVER_BUDGET';
-      else if (projectedTotal >= totalBudgetLimit * 0.85) status = 'NEAR_BUDGET';
+    transactions.forEach((tx) => {
+      if (tx.amount >= 0 || Math.abs(tx.amount) >= 1_000_000) {
+        return;
+      }
+
+      const date = parseTransactionDate(tx.date);
+
+      if (!date || isNaN(date.getTime())) {
+        return;
+      }
+
+      const year = date.getFullYear();
+      const month = date.getMonth();
+
+      const monthKey = `${year}-${String(month + 1).padStart(2, '0')}`;
+
+      expensesByMonth[monthKey] =
+        (expensesByMonth[monthKey] || 0) + Math.abs(tx.amount);
+    });
+
+    const monthlyExpenses = Object.values(expensesByMonth);
+
+    const totalHistoricalExpenses = monthlyExpenses.reduce(
+      (total, value) => total + value,
+      0
+    );
+
+    const monthsWithData = monthlyExpenses.length;
+
+    const projectedSpend =
+      monthsWithData > 0
+        ? roundVal(totalHistoricalExpenses / monthsWithData)
+        : 0;
+
+    /*
+     * 3. EXPECTED DAILY
+     *
+     * Projected Spend / number of days in upcoming month
+     */
+    const expectedDaily =
+      daysInUpcomingMonth > 0
+        ? roundVal(projectedSpend / daysInUpcomingMonth)
+        : 0;
+
+    /*
+     * 4. REMAINING BUDGET
+     *
+     * Based on CURRENT MONTH spend.
+     */
+    const remainingBudget = Math.max(
+      0,
+      totalBudgetLimit - currentSpend
+    );
+
+    /*
+     * 5. BUDGET STATUS
+     *
+     * Compare projected spend against the monthly budget.
+     */
+    let status: 'UNDER_BUDGET' | 'NEAR_BUDGET' | 'OVER_BUDGET' =
+      'UNDER_BUDGET';
+
+    if (projectedSpend > 0 && totalBudgetLimit > 0) {
+      if (projectedSpend > totalBudgetLimit) {
+        status = 'OVER_BUDGET';
+      } else if (projectedSpend >= totalBudgetLimit * 0.85) {
+        status = 'NEAR_BUDGET';
+      }
     }
 
+    const isInsufficient = monthsWithData === 0;
+
     return {
-      daily_burn_rate: dailyBurnRate,
-      projected_total: projectedTotal,
-      current_spend: roundVal(totalSpent),
+      daily_burn_rate: expectedDaily,
+      projected_total: projectedSpend,
+      current_spend: roundVal(currentSpend),
       monthly_budget: roundVal(totalBudgetLimit),
       remaining_budget: roundVal(remainingBudget),
       insufficient_data: isInsufficient,
@@ -53,16 +153,11 @@ export const BudgetForecast: React.FC<BudgetForecastProps> = ({ transactions = [
     };
   }, [transactions, totalBudgetLimit]);
 
-  useEffect(() => {
-    apiFetch<ForecastResponse>('/budgets/forecast')
-      .then((data) => setForecast(data))
-      .catch(() => setForecast(localForecast));
-  }, [transactions, totalBudgetLimit, localForecast]);
-
-  const activeForecast = forecast || localForecast;
-
   const formatCurrency = (val: number | null | undefined) => {
-    if (val === null || val === undefined || isNaN(val)) return '—';
+    if (val === null || val === undefined || isNaN(val)) {
+      return '—';
+    }
+
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
       currency: 'USD',
@@ -71,21 +166,46 @@ export const BudgetForecast: React.FC<BudgetForecastProps> = ({ transactions = [
     }).format(val);
   };
 
-  const getStatusBadge = (status: 'UNDER_BUDGET' | 'NEAR_BUDGET' | 'OVER_BUDGET', isInsufficient: boolean) => {
+  const getStatusBadge = (
+    status: 'UNDER_BUDGET' | 'NEAR_BUDGET' | 'OVER_BUDGET',
+    isInsufficient: boolean
+  ) => {
     if (isInsufficient) {
-      return { label: 'Pending Data', colorClass: 'bg-[#3b82f6]/15 text-[#93c5fd] border-[#3b82f6]/30' };
+      return {
+        label: 'Pending Data',
+        colorClass:
+          'bg-[#3b82f6]/15 text-[#93c5fd] border-[#3b82f6]/30',
+      };
     }
+
     switch (status) {
       case 'OVER_BUDGET':
-        return { label: 'Over Budget', colorClass: 'bg-[#ffb4ab]/15 text-[#ffb4ab] border-[#ffb4ab]/30' };
+        return {
+          label: 'Over Budget',
+          colorClass:
+            'bg-[#ffb4ab]/15 text-[#ffb4ab] border-[#ffb4ab]/30',
+        };
+
       case 'NEAR_BUDGET':
-        return { label: 'Near Budget', colorClass: 'bg-amber-400/15 text-amber-300 border-amber-400/30' };
+        return {
+          label: 'Near Budget',
+          colorClass:
+            'bg-amber-400/15 text-amber-300 border-amber-400/30',
+        };
+
       default:
-        return { label: 'Under Budget', colorClass: 'bg-[#3b82f6]/15 text-[#93c5fd] border-[#3b82f6]/30' };
+        return {
+          label: 'Under Budget',
+          colorClass:
+            'bg-[#3b82f6]/15 text-[#93c5fd] border-[#3b82f6]/30',
+        };
     }
   };
 
-  const statusBadge = getStatusBadge(activeForecast.status, activeForecast.insufficient_data);
+  const statusBadge = getStatusBadge(
+    forecast.status,
+    forecast.insufficient_data
+  );
 
   return (
     <div
@@ -95,67 +215,104 @@ export const BudgetForecast: React.FC<BudgetForecastProps> = ({ transactions = [
       {/* Header */}
       <div className="flex justify-between items-start mb-4">
         <div>
-          <h3 className="text-xl font-bold text-[#d4e4fa] tracking-tight">Budget Forecast</h3>
-          <p className="text-sm text-[#c7c4d8]/80 font-normal mt-0.5">Projected month-end spending</p>
+          <h3 className="text-xl font-bold text-[#d4e4fa] tracking-tight">
+            Budget Forecast
+          </h3>
+
+          <p className="text-sm text-[#c7c4d8]/80 font-normal mt-0.5">
+            Monthly average & upcoming expectation
+          </p>
         </div>
-        <span className={`px-2.5 py-1 rounded-md text-xs font-mono-data font-bold border ${statusBadge.colorClass}`}>
+
+        <span
+          className={`px-2.5 py-1 rounded-md text-xs font-mono-data font-bold border ${statusBadge.colorClass}`}
+        >
           {statusBadge.label}
         </span>
       </div>
 
-      {activeForecast.insufficient_data ? (
-        /* Early Month / Insufficient Data Callout */
+      {forecast.insufficient_data ? (
         <div className="p-4 bg-[#010f1f]/80 rounded-xl border border-[#3b82f6]/30 flex items-center gap-3 my-2">
-          <span className="material-symbols-outlined text-[#3b82f6] text-2xl">info</span>
+          <span className="material-symbols-outlined text-[#3b82f6] text-2xl">
+            info
+          </span>
+
           <div>
-            <p className="text-xs font-bold text-[#d4e4fa]">Early Month Notice</p>
+            <p className="text-xs font-bold text-[#d4e4fa]">
+              No Expense Data
+            </p>
+
             <p className="text-xs text-[#c7c4d8] leading-relaxed">
-              Not enough data yet to generate a reliable forecast.
+              Add expense transactions to generate a reliable monthly
+              forecast.
             </p>
           </div>
         </div>
       ) : (
-        /* Key Metrics Grid */
         <div className="grid grid-cols-3 gap-3 my-2">
-          <div className="p-3 bg-[#010f1f]/60 rounded-xl border border-[#464555]/20 overflow-hidden" title={`Exact Current Spend: ${formatSmartCurrency(activeForecast.current_spend).exact}`}>
+          {/* Current Spend */}
+          <div
+            className="p-3 bg-[#010f1f]/60 rounded-xl border border-[#464555]/20 overflow-hidden"
+            title={`Current Month Spend: ${
+              formatSmartCurrency(forecast.current_spend).exact
+            }`}
+          >
             <p className="text-[10px] font-mono-data text-[#c7c4d8]/70 uppercase tracking-wider font-semibold">
               Current Spend
             </p>
+
             <p className="text-base sm:text-lg font-bold text-[#d4e4fa] font-mono-data mt-0.5 truncate">
-              {formatSmartCurrency(activeForecast.current_spend).display}
+              {formatSmartCurrency(forecast.current_spend).display}
             </p>
           </div>
 
-          <div className="p-3 bg-[#010f1f]/60 rounded-xl border border-[#464555]/20 overflow-hidden" title={`Exact Daily Avg: ${formatSmartCurrency(activeForecast.daily_burn_rate).exact}/day`}>
+          {/* Expected Daily */}
+          <div
+            className="p-3 bg-[#010f1f]/60 rounded-xl border border-[#464555]/20 overflow-hidden"
+            title={`Expected Daily: ${
+              formatSmartCurrency(forecast.daily_burn_rate).exact
+            }/day`}
+          >
             <p className="text-[10px] font-mono-data text-[#c7c4d8]/70 uppercase tracking-wider font-semibold">
-              Daily Avg
+              Expected Daily
             </p>
+
             <p className="text-base sm:text-lg font-bold text-[#d4e4fa] font-mono-data mt-0.5 truncate">
-              {formatSmartCurrency(activeForecast.daily_burn_rate).display}/d
+              {formatSmartCurrency(forecast.daily_burn_rate).display}/d
             </p>
           </div>
 
-          <div className="p-3 bg-[#010f1f]/60 rounded-xl border border-[#464555]/20 overflow-hidden" title={`Exact Projected Total: ${formatSmartCurrency(activeForecast.projected_total).exact}`}>
+          {/* Projected Spend */}
+          <div
+            className="p-3 bg-[#010f1f]/60 rounded-xl border border-[#464555]/20 overflow-hidden"
+            title={`Projected Spend: ${
+              formatSmartCurrency(forecast.projected_total).exact
+            }`}
+          >
             <p className="text-[10px] font-mono-data text-[#c7c4d8]/70 uppercase tracking-wider font-semibold">
-              Projected Total
+              Projected Spend
             </p>
+
             <p className="text-base sm:text-lg font-bold text-[#d4e4fa] font-mono-data mt-0.5 truncate">
-              {formatSmartCurrency(activeForecast.projected_total).display}
+              {formatSmartCurrency(forecast.projected_total).display}
             </p>
           </div>
         </div>
       )}
 
-      {/* Progress & Insight Footers */}
+      {/* Budget */}
       <div className="space-y-3 mt-2">
         <div className="flex justify-between items-center text-xs">
-          <span className="text-[#c7c4d8]">Monthly Budget: {formatCurrency(activeForecast.monthly_budget)}</span>
+          <span className="text-[#c7c4d8]">
+            Monthly Budget: {formatCurrency(forecast.monthly_budget)}
+          </span>
+
           <span className="text-[#c7c4d8] font-mono-data font-bold">
-            Remaining: {formatCurrency(activeForecast.remaining_budget)}
+            Remaining: {formatCurrency(forecast.remaining_budget)}
           </span>
         </div>
 
-        {/* AI Insight Callout */}
+        {/* Insight */}
         <div className="flex items-center gap-3 p-3 bg-[#010f1f]/60 rounded-xl border border-[#464555]/20">
           <div className="w-8 h-8 flex items-center justify-center bg-[#3b82f6]/15 rounded-lg shrink-0">
             <span
@@ -165,24 +322,36 @@ export const BudgetForecast: React.FC<BudgetForecastProps> = ({ transactions = [
               insights
             </span>
           </div>
+
           <p className="text-xs text-[#c7c4d8] leading-relaxed">
             {(() => {
-              if (activeForecast.categories_at_risk.length > 0) {
-                return `At-risk category: "${activeForecast.categories_at_risk[0].category_name}" projected at ${formatCurrency(activeForecast.categories_at_risk[0].projected_spend)}.`;
+              if (forecast.monthly_budget === 0) {
+                return `Based on historical spending, your projected monthly spend is ${formatCurrency(
+                  forecast.projected_total
+                )}.`;
               }
-              if (activeForecast.insufficient_data) {
-                return `Forecast will calibrate as more transactions are logged this month.`;
+
+              if (forecast.status === 'OVER_BUDGET') {
+                return `Warning: Your projected monthly spend of ${formatCurrency(
+                  forecast.projected_total
+                )} exceeds your ${formatCurrency(
+                  forecast.monthly_budget
+                )} budget.`;
               }
-              if (activeForecast.monthly_budget === 0) {
-                return `At a daily burn rate of ${formatCurrency(activeForecast.daily_burn_rate)}/day, your month-end spend is projected at ${formatCurrency(activeForecast.projected_total || 0)}.`;
+
+              if (forecast.status === 'NEAR_BUDGET') {
+                return `Caution: Your projected monthly spend of ${formatCurrency(
+                  forecast.projected_total
+                )} is close to your ${formatCurrency(
+                  forecast.monthly_budget
+                )} limit.`;
               }
-              if (activeForecast.status === 'OVER_BUDGET') {
-                return `Warning: At ${formatCurrency(activeForecast.daily_burn_rate)}/day, your projected spend of ${formatCurrency(activeForecast.projected_total || 0)} exceeds your ${formatCurrency(activeForecast.monthly_budget)} budget.`;
-              }
-              if (activeForecast.status === 'NEAR_BUDGET') {
-                return `Caution: At ${formatCurrency(activeForecast.daily_burn_rate)}/day, your projected spend is close to reaching your ${formatCurrency(activeForecast.monthly_budget)} monthly limit.`;
-              }
-              return `At current burn rate of ${formatCurrency(activeForecast.daily_burn_rate)}/day, your month-end spend is projected within your ${formatCurrency(activeForecast.monthly_budget)} budget.`;
+
+              return `Your projected monthly spend of ${formatCurrency(
+                forecast.projected_total
+              )} is within your ${formatCurrency(
+                forecast.monthly_budget
+              )} budget.`;
             })()}
           </p>
         </div>
@@ -191,6 +360,6 @@ export const BudgetForecast: React.FC<BudgetForecastProps> = ({ transactions = [
   );
 };
 
-function roundVal(v: number) {
-  return Math.round(v * 100) / 100;
+function roundVal(value: number) {
+  return Math.round(value * 100) / 100;
 }

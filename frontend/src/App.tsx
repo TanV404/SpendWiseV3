@@ -18,6 +18,7 @@ import {
   INITIAL_BUDGET,
 } from './mockData';
 import { Transaction, RecurringItem, ModalType, BudgetConfig, CategoryItem, BudgetStatusItem } from './types';
+import { isCurrentMonthAndYear } from './utils/formatters';
 
 export default function App() {
   const { currentUser, loading: authLoading, logout } = useAuth();
@@ -291,19 +292,32 @@ export default function App() {
     return Math.abs(tx.amount) < 1_000_000;
   });
 
-  const extraExpenseSum = activeTransactions
+  // Card 1: Total Balance computed from ALL data across all time
+  const allTimeExpenseSum = activeTransactions
     .filter((tx) => tx.amount < 0)
     .reduce((acc, tx) => acc + Math.abs(tx.amount), 0);
 
-  const extraIncomeSum = activeTransactions
+  const allTimeIncomeSum = activeTransactions
     .filter((tx) => tx.amount > 0)
     .reduce((acc, tx) => acc + tx.amount, 0);
 
-  const monthlySpending = extraExpenseSum;
-  const totalBalance = extraIncomeSum - extraExpenseSum;
+  const totalBalance = allTimeIncomeSum - allTimeExpenseSum;
+
+  // Cards 2, 3, 4: Current Month data only
+  const currentMonthTransactions = activeTransactions.filter((tx) => isCurrentMonthAndYear(tx.date));
+
+  const currentMonthSpending = currentMonthTransactions
+    .filter((tx) => tx.amount < 0)
+    .reduce((acc, tx) => acc + Math.abs(tx.amount), 0);
+
+  const currentMonthIncome = currentMonthTransactions
+    .filter((tx) => tx.amount > 0)
+    .reduce((acc, tx) => acc + tx.amount, 0);
+
+  const monthlySpending = currentMonthSpending;
   const hasBudget = budget.totalLimit > 0;
   const budgetRemaining = hasBudget ? Math.max(0, budget.totalLimit - monthlySpending) : 0;
-  const currentSaved = Math.max(0, totalBalance);
+  const currentSaved = Math.max(0, currentMonthIncome - currentMonthSpending);
   const savingsProgress = savingsGoal > 0 ? Math.round(Math.min(100, (currentSaved / savingsGoal) * 100)) : 0;
 
   // Handlers

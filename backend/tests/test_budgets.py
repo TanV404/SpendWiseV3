@@ -1,3 +1,6 @@
+from datetime import datetime
+
+
 def test_budget_upsert_and_status(client):
     # Register user
     reg = client.post(
@@ -20,15 +23,17 @@ def test_budget_upsert_and_status(client):
     )
     assert b_res.status_code == 201
 
+    cur_date = datetime.now().strftime("%b %d, %Y")
+
     # 2. Add some expenses
     client.post(
         "/transactions",
-        json={"merchant": "Groceries Store", "category": "Groceries", "date": "May 10, 2024", "amount": -300.0},
+        json={"merchant": "Groceries Store", "category": "Groceries", "date": cur_date, "amount": -300.0},
         headers=headers,
     )
     client.post(
         "/transactions",
-        json={"merchant": "Coffee Shop", "category": "Dining Out", "date": "May 11, 2024", "amount": -50.0},
+        json={"merchant": "Coffee Shop", "category": "Dining Out", "date": cur_date, "amount": -50.0},
         headers=headers,
     )
 
@@ -60,10 +65,12 @@ def test_budget_defensive_outlier_filtering(client):
         headers=headers,
     )
 
+    cur_date = datetime.now().strftime("%b %d, %Y")
+
     # Valid transaction
     client.post(
         "/transactions",
-        json={"merchant": "Normal Grocery", "category": "Groceries", "date": "May 10, 2024", "amount": -120.0},
+        json={"merchant": "Normal Grocery", "category": "Groceries", "date": cur_date, "amount": -120.0},
         headers=headers,
     )
 

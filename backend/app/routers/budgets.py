@@ -104,6 +104,7 @@ def get_budget_status(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    now = datetime.now(timezone.utc)
     budgets = db.query(Budget).filter(Budget.user_id == current_user.id).all()
     transactions = db.query(Transaction).filter(Transaction.user_id == current_user.id).all()
 
@@ -118,6 +119,11 @@ def get_budget_status(
                 "Defensive aggregation skipped outlier/flagged transaction ID=%s, merchant=%s, amount=%s",
                 tx.id, tx.merchant, tx.amount
             )
+            continue
+
+        # Check that transaction is within current calendar month and year
+        tx_dt = parse_tx_date(tx.date) if tx.date else None
+        if tx_dt and (tx_dt.year != now.year or tx_dt.month != now.month):
             continue
 
         if tx.amount < 0:  # Expense
@@ -183,15 +189,17 @@ def get_budget_forecast(
     7. Identify categories exceeding their monthly allocation limit.
     """
     now = datetime.now(timezone.utc)
-    days_in_month = monthrange(now.year, now.month)[1]
-    days_elapsed = max(1, now.day)
+    upcoming_year = now.year + 1 if now.month == 12 else now.year
+    upcoming_month = 1 if now.month == 12 else now.month + 1
+    days_in_upcoming_month = monthrange(upcoming_year, upcoming_month)[1]
 
     transactions = db.query(Transaction).filter(Transaction.user_id == current_user.id).all()
     budgets = db.query(Budget).filter(Budget.user_id == current_user.id).all()
 
     current_month_expenses = []
     cat_spent = {}
-    total_expense_so_far = 0.0
+    current_month_total_expense = 0.0
+    monthly_expenses_current_year: dict[int, float] = {}
 
     for tx in transactions:
         if getattr(tx, "is_flagged", False) or abs(tx.amount) >= 1_000_000:
@@ -202,20 +210,38 @@ def get_budget_forecast(
             )
             continue
 
+        tx_dt = parse_tx_date(tx.date) if tx.date else None
+        if not tx_dt:
+            continue
+
         if tx.amount < 0:
             amt = abs(tx.amount)
-            total_expense_so_far += amt
-            current_month_expenses.append(tx)
-            c_id = tx.category_id or "unassigned"
-            cat_spent[c_id] = cat_spent.get(c_id, 0.0) + amt
+            # Track current year monthly totals
+            if tx_dt.year == now.year:
+                monthly_expenses_current_year[tx_dt.month] = (
+                    monthly_expenses_current_year.get(tx_dt.month, 0.0) + amt
+                )
+
+            # Track current month
+            if tx_dt.year == now.year and tx_dt.month == now.month:
+                current_month_total_expense += amt
+                current_month_expenses.append(tx)
+                c_id = tx.category_id or "unassigned"
+                cat_spent[c_id] = cat_spent.get(c_id, 0.0) + amt
 
     total_monthly_budget = sum(b.monthly_limit for b in budgets)
 
-    # Insufficient data check for early month
-    is_insufficient = days_elapsed < 2 or (len(current_month_expenses) < 2 and total_expense_so_far == 0)
+    # 1. Projected Spend: Average of all monthly expenses for current year
+    months_with_data = len(monthly_expenses_current_year)
+    if months_with_data > 0:
+        projected_spend = round(sum(monthly_expenses_current_year.values()) / months_with_data, 2)
+    else:
+        projected_spend = round(current_month_total_expense, 2)
 
-    daily_burn_rate = round(total_expense_so_far / days_elapsed, 2)
-    projected_total = round(daily_burn_rate * days_in_month, 2) if not is_insufficient else None
+    # 2. Expected Daily: Projected Spend / days in upcoming month
+    expected_daily = round(projected_spend / days_in_upcoming_month, 2) if days_in_upcoming_month > 0 else 0.0
+
+    is_insufficient = months_with_data == 0 and current_month_total_expense == 0.0
 
     # Categories at risk
     categories_at_risk = []
@@ -223,31 +249,30 @@ def get_budget_forecast(
         if b.monthly_limit > 0:
             c_id = b.category_id or "unassigned"
             spent_so_far = cat_spent.get(c_id, 0.0)
-            proj_cat_spend = round((spent_so_far / days_elapsed) * days_in_month, 2)
-            if proj_cat_spend > b.monthly_limit:
+            if spent_so_far > b.monthly_limit:
                 cat_name = b.category_rel.name if b.category_rel else "Overall"
                 categories_at_risk.append(
                     CategoryAtRisk(
                         category_id=b.category_id,
                         category_name=cat_name,
-                        projected_spend=proj_cat_spend,
+                        projected_spend=round(spent_so_far, 2),
                         monthly_limit=b.monthly_limit,
                     )
                 )
 
-    remaining_budget = max(0.0, total_monthly_budget - total_expense_so_far)
+    remaining_budget = max(0.0, total_monthly_budget - current_month_total_expense)
 
     # Over budget risk calculation
     over_budget_risk = False
-    if projected_total is not None and total_monthly_budget > 0:
-        over_budget_risk = projected_total > total_monthly_budget
+    if projected_spend > 0 and total_monthly_budget > 0:
+        over_budget_risk = projected_spend > total_monthly_budget
     elif categories_at_risk:
         over_budget_risk = True
 
     # Days until exhaustion
     days_until_exhausted = None
-    if daily_burn_rate > 0 and remaining_budget > 0:
-        days_until_exhausted = int(remaining_budget // daily_burn_rate)
+    if expected_daily > 0 and remaining_budget > 0:
+        days_until_exhausted = int(remaining_budget // expected_daily)
     elif remaining_budget == 0 and total_monthly_budget > 0:
         days_until_exhausted = 0
 
@@ -255,15 +280,15 @@ def get_budget_forecast(
     status = "UNDER_BUDGET"
     if over_budget_risk:
         status = "OVER_BUDGET"
-    elif projected_total is not None and total_monthly_budget > 0 and projected_total >= (total_monthly_budget * 0.85):
+    elif projected_spend > 0 and total_monthly_budget > 0 and projected_spend >= (total_monthly_budget * 0.85):
         status = "NEAR_BUDGET"
 
     return ForecastResponse(
-        daily_burn_rate=daily_burn_rate,
-        projected_total=projected_total,
+        daily_burn_rate=expected_daily,
+        projected_total=projected_spend,
         over_budget_risk=over_budget_risk,
         days_until_budget_exhausted=days_until_exhausted,
-        current_spend=round(total_expense_so_far, 2),
+        current_spend=round(current_month_total_expense, 2),
         monthly_budget=round(total_monthly_budget, 2),
         remaining_budget=round(remaining_budget, 2),
         insufficient_data=is_insufficient,
